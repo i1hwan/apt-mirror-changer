@@ -48,7 +48,6 @@ wget -O apt-mirror-changer.sh https://raw.githubusercontent.com/i1hwan/apt-mirro
 
 1. Fork 후 Pull Request
 2. 이슈 보고: 버그나 기능 제안
-3. 미러 추가: MIRRORS 배열에 새 미러 추가
 
 ## 라이선스
 
