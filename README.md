@@ -55,4 +55,4 @@ wget -O apt-mirror-changer.sh https://raw.githubusercontent.com/i1hwan/apt-mirro
 MIT License
 
 ## 개발자
-![i1hwan](https://github.com/i1hwan)
+[i1hwan](https://github.com/i1hwan)
