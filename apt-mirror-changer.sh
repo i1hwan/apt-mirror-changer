@@ -6,6 +6,10 @@ trap 'echo "스크립트가 중단되었습니다. 백업 파일을 확인하세
 # Ubuntu APT Mirror Changer Script
 # ===================================
 # Compatible with Ubuntu 20.04 to 25.xx
+#
+# 특징:
+# - 일반 저장소는 선택한 미러 서버 사용
+# - 보안 저장소(security)는 항상 공식 security.ubuntu.com 서버 사용
 
 # --- Configuration ---
 # Format: "TAG" "Description" "URL"
@@ -306,11 +310,18 @@ change_mirror() {
     fi
 
     if [ "$SOURCES_FORMAT" == "deb822" ]; then
-        sed -i -e "s|^URIs: .*|URIs: ${mirror_url}|g" \
-               -e "s|^Suites: .*|Suites: ${UBUNTU_CODENAME} ${UBUNTU_CODENAME}-updates ${UBUNTU_CODENAME}-backports ${UBUNTU_CODENAME}-security|g" \
+        sed -i -e '0,/^URIs:/s|^URIs: .*|URIs: '"${mirror_url}"'|' \
+               -e '0,/^Suites:/s|^Suites: .*|Suites: '"${UBUNTU_CODENAME}"' '"${UBUNTU_CODENAME}"'-updates '"${UBUNTU_CODENAME}"'-backports|' \
                "$TARGET_FILE"
     else
-        sed -i -E "s|deb (https?://)[^/]+/(ubuntu/?)|deb ${mirror_url}|g" "$TARGET_FILE"
+        debug "변경 전 sources.list 내용:"
+        debug "$(cat "$TARGET_FILE" | head -10)"
+        
+        # security 관련 줄을 제외하고 변경 (security.ubuntu.com 또는 -security가 있는 줄)
+        sed -i -E '/(-security|security\.ubuntu\.com)/!s|^deb\s+(https?://)([^/]+)(/ubuntu/?)?|deb '"${mirror_url}"'|g' "$TARGET_FILE"
+        
+        debug "변경 후 sources.list 내용:"
+        debug "$(cat "$TARGET_FILE" | head -10)"
     fi
 
     if [ $? -eq 0 ]; then
@@ -342,19 +353,48 @@ verify_changes() {
 
     # Check if apt update would use the correct mirror
     local apt_output
-    apt_output=$(apt update --print-uris 2>/dev/null | head -20)
-
+    apt_output=$(apt update --print-uris 2>/dev/null | head -50)
+    debug "apt update --print-uris 출력:"
+    debug "$apt_output"
+    
+    # 일반 저장소는 지정된 미러로, 보안 저장소는 security.ubuntu.com으로 설정되었는지 확인
+    local mirror_found=0
+    local security_found=0
+    
+    # 선택한 미러가 일반 저장소에 적용되었는지 확인
     if echo "$apt_output" | grep -q "$mirror_url"; then
+        mirror_found=1
+        debug "미러 URL 확인됨: $mirror_url"
+    fi
+    
+    # 보안 저장소가 적절하게 설정되었는지 확인
+    # Ubuntu 버전에 따라 security.ubuntu.com 또는 -security 패턴 확인
+    if echo "$apt_output" | grep -q "security.ubuntu.com\|security\|${UBUNTU_CODENAME}-security"; then
+        security_found=1
+        debug "보안 저장소 확인됨"
+    fi
+    
+    if [ $mirror_found -eq 1 ] && [ $security_found -eq 1 ]; then
         if [ "$INTERACTIVE" = true ]; then
-            whiptail --title "검증 성공" --msgbox "APT 서버 주소가 성공적으로 변경되었습니다!" 8 50
+            whiptail --title "검증 성공" --msgbox "APT 서버 주소가 성공적으로 변경되었습니다!\n- 일반 저장소: $mirror_url\n- 보안 저장소: security.ubuntu.com" 10 60
             exit 0
         else
             echo "검증 성공: APT 소스에서 지정한 미러 URL을 확인했습니다."
+            echo "- 일반 저장소: $mirror_url"
+            echo "- 보안 저장소: security.ubuntu.com"
             exit 0
         fi
     else
+        local error_message=""
+        if [ $mirror_found -eq 0 ]; then
+            error_message="${error_message}일반 저장소 미러 URL이 올바르게 변경되지 않았습니다.\n"
+        fi
+        if [ $security_found -eq 0 ]; then
+            error_message="${error_message}보안 저장소 URL이 올바르게 설정되지 않았습니다.\n"
+        fi
+        
         if [ "$INTERACTIVE" = true ]; then
-            whiptail --title "검증 실패" --yesno "APT 소스에서 지정한 미러 URL을 찾을 수 없습니다. 백업 파일로 자동 복원하시겠습니까?" 8 60
+            whiptail --title "검증 실패" --yesno "APT 소스 변경이 올바르게 적용되지 않았습니다:\n${error_message}\n백업 파일로 자동 복원하시겠습니까?" 12 70
             if [ $? -eq 0 ]; then
                 if [ -f "$BACKUP_FILE" ]; then
                     cp -a "$BACKUP_FILE" "$TARGET_FILE"
@@ -364,7 +404,8 @@ verify_changes() {
                 fi
             fi
         else
-            echo "검증 실패: APT 소스에서 지정한 미러 URL을 찾을 수 없습니다."
+            echo "검증 실패:"
+            echo -e "$error_message"
             if [ -f "$BACKUP_FILE" ]; then
                 cp -a "$BACKUP_FILE" "$TARGET_FILE"
                 echo "백업 파일로부터 설정을 복원했습니다."
